@@ -143,8 +143,22 @@ function strokeFigure(g,lw){const cx=W/2,cy=H/2,s=S.figSize/100;
   else if(S.fig==='custom'&&customSil){const k=s*Math.min(W,H)/600,dw=600*k,dh=600*k;g.strokeRect(cx-dw/2,cy-dh/2,dw,dh)}
   else{const k=Math.min(W/SQW,H/SQH)*s,dw=SQW*k,dh=SQH*k;g.save();g.translate(cx-dw/2,cy-dh/2);g.scale(k,k);g.lineWidth=lw/k;g.stroke(SQP);g.restore()}}
 function bandPx(){return Math.max(1.5,S.band/100*Math.min(W,H)*0.16)}
+// exact Euclidean distance (Felzenszwalb) — smooth float field instead of 8-bit blur
+let DIST=null;
+function edt1(f,n,d,v,z){let k=0;v[0]=0;z[0]=-1e20;z[1]=1e20;
+  for(let q=1;q<n;q++){let s;while(true){const r=v[k];s=((f[q]+q*q)-(f[r]+r*r))/(2*q-2*r);if(s<=z[k]){k--;if(k<0){k=0;break}}else break}
+    k++;v[k]=q;z[k]=s;z[k+1]=1e20}
+  k=0;for(let q=0;q<n;q++){while(z[k+1]<q)k++;const r=v[k];d[q]=(q-r)*(q-r)+f[r]}}
+function distInside(mask){const N=W*H,INF=1e20,D=new Float32Array(N);
+  for(let i=0;i<N;i++)D[i]=mask[i*4+3]>127?INF:0;
+  const n=Math.max(W,H),f=new Float64Array(n),d=new Float64Array(n),v=new Int32Array(n),z=new Float64Array(n+1);
+  for(let x=0;x<W;x++){for(let y=0;y<H;y++)f[y]=D[y*W+x];edt1(f,H,d,v,z);for(let y=0;y<H;y++)D[y*W+x]=d[y]}
+  for(let y=0;y<H;y++){const o=y*W;for(let x=0;x<W;x++)f[x]=D[o+x];edt1(f,W,d,v,z);for(let x=0;x<W;x++)D[o+x]=Math.sqrt(d[x])}
+  // soften the ridge a little so normals stay smooth
+  const T=new Float32Array(N);for(let y=0;y<H;y++)for(let x=0;x<W;x++){let s=0,c=0;for(let j=-1;j<=1;j++){const yy=y+j;if(yy<0||yy>=H)continue;for(let i=-1;i<=1;i++){const xx=x+i;if(xx<0||xx>=W)continue;s+=D[yy*W+xx];c++}}T[y*W+x]=s/c}
+  return T}
 function buildFigure(){const g=ctx(figC);g.setTransform(1,0,0,1,0,0);g.globalAlpha=1;g.filter='none';g.clearRect(0,0,W,H);g.fillStyle='#fff';fillFigure(g);
-  const g2=ctx(fieldC);g2.setTransform(1,0,0,1,0,0);g2.globalAlpha=1;g2.clearRect(0,0,W,H);g2.save();g2.filter=`blur(${bandPx()}px)`;g2.drawImage(figC,0,0);g2.restore()}
+  DIST=distInside(g.getImageData(0,0,W,H).data)}
 
 // ---------- geometry (non-figure clear zone) ----------
 function clearPath(g){const cx=W/2,cy=H/2;
@@ -186,14 +200,14 @@ function applyGlassZone(){
 function applyGlassOverlay(){
   const g=ctx(view);g.setTransform(1,0,0,1,0,0);g.filter='none';g.globalAlpha=1;g.clearRect(0,0,W,H);g.drawImage(cropC,0,0);
   const src=ctx(cropC).getImageData(0,0,W,H).data,frost=ctx(blurC).getImageData(0,0,W,H).data;
-  const field=ctx(fieldC).getImageData(0,0,W,H).data,mask=ctx(figC).getImageData(0,0,W,H).data;
+  const mask=ctx(figC).getImageData(0,0,W,H).data;
   const lay=ctx(tmpC).createImageData(W,H),o=lay.data;
   const cx=W/2,cy=H/2,R=bandPx(),amp=S.refract/100*R*1.15,mag=S.refract/100*0.05,chroma=S.chroma/100*0.5,lx=-0.55,ly=-0.83,L=0.9;
-  const fa=(x,y)=>field[((y<0?0:y>H-1?H-1:y)*W+(x<0?0:x>W-1?W-1:x))*4+3];
+  const fa=(x,y)=>DIST[(y<0?0:y>H-1?H-1:y)*W+(x<0?0:x>W-1?W-1:x)];
   for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=(y*W+x)*4;const ma=mask[i+3];if(ma===0){o[i+3]=0;continue}
-    const a=field[i+3]/255;
-    let gx=fa(x+1,y)-fa(x-1,y),gy=fa(x,y+1)-fa(x,y-1);const gn=Math.hypot(gx,gy)||1;const inx=gx/gn,iny=gy/gn;// inward normal
-    const t=Math.min(a/L,1),prof=Math.sin(Math.PI*t)*(1-t*0.15),d=amp*prof;
+    const dd=DIST[y*W+x],a=dd/R;
+    let gx=fa(x+2,y)-fa(x-2,y),gy=fa(x,y+2)-fa(x,y-2);const gn=Math.hypot(gx,gy)||1;const inx=gx/gn,iny=gy/gn;// inward normal from exact distance
+    const tt=Math.min(a,1),t=tt*tt*(3-2*tt),kk=1+S.refract/100*1.6,d=tt<1?R*(1-Math.pow(1-tt,kk))-dd:0;// monotonic remap: edge pulls image from deeper inside, never folds
     const sxb=cx+(x-cx)*(1-mag),syb=cy+(y-cy)*(1-mag);let cr,cg,cb;
     if(chroma>0){const rr=sampleBi(src,sxb+inx*d*(1+chroma),syb+iny*d*(1+chroma)),gg=sampleBi(src,sxb+inx*d,syb+iny*d),bb=sampleBi(src,sxb+inx*d*(1-chroma),syb+iny*d*(1-chroma));cr=rr[0];cg=gg[1];cb=bb[2]}
     else{const c=sampleBi(src,sxb+inx*d,syb+iny*d);cr=c[0];cg=c[1];cb=c[2]}
