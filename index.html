@@ -70,13 +70,13 @@ button.b:active{filter:brightness(.92)}
 <script>
 (()=>{
 const S={aspect:'1x1',zoom:120,panx:0,pany:0,
-  shape:'ellipse',clear:46,feather:40,blur:60,magnify:8,gloss:28,darken:12,
+  shape:'ellipse',clear:46,band:46,refract:62,frost:40,gloss:50,chroma:14,tint:8,
   fmt:'png',q:92,preset:'orig'};
-const MAXSIDE=3200,OUTLONG=1600;
+const MAXSIDE=3200,OUTLONG=1440;
 const $=id=>document.getElementById(id);
 const mk=()=>document.createElement('canvas');
 const view=$('view'),ov=$('ov'),wrap=$('wrap'),stage=$('stage'),pane=$('pane');
-const srcC=mk(),cropC=mk(),blurC=mk(),maskC=mk(),tmpC=mk();
+const srcC=mk(),cropC=mk(),blurC=mk(),tmpC=mk();
 const ctx=c=>c.getContext('2d');
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 let sw=0,sh=0,W=0,H=0,fileBase='photo';
@@ -94,8 +94,8 @@ function sample(){const c=mk();c.width=1600;c.height=1600;const g=ctx(c);g.fillS
 // ---------- image io ----------
 function recalc(){if(!sw)return;let a;if(S.aspect==='orig')a=sw/sh;else{const [aw,ah]=S.aspect.split('x').map(Number);a=aw/ah}
   if(a>=1){W=OUTLONG;H=Math.round(OUTLONG/a)}else{H=OUTLONG;W=Math.round(OUTLONG*a)}
-  for(const c of [cropC,blurC,maskC,tmpC,view,ov]){c.width=W;c.height=H}
-  const m=$('meta');if(m)m.textContent=sw+'×'+sh+'  →  '+W+'×'+H;fit();schedule()}
+  for(const c of [cropC,blurC,tmpC,view,ov]){c.width=W;c.height=H}
+  const m=$('meta');if(m)m.textContent=sw+'×'+sh+'  →  '+W+'×'+H;fit();schedule(true)}
 function setImage(img,name){let w=img.naturalWidth||img.width,h=img.naturalHeight||img.height;const k=Math.min(1,MAXSIDE/Math.max(w,h));sw=Math.round(w*k);sh=Math.round(h*k);
   srcC.width=sw;srcC.height=sh;ctx(srcC).drawImage(img,0,0,sw,sh);if(name)fileBase=name.replace(/\.[^.]+$/,'').slice(0,60)||'photo';recalc()}
 function loadFile(f){if(!f||!f.type.startsWith('image/')){toast('Нужен JPG, PNG или WebP');return}
@@ -109,49 +109,87 @@ function fit(){if(!W)return;const r=stage.getBoundingClientRect();const wide=win
   const s=Math.min((r.width-padL-padR)/W,(r.height-padY*2)/H);wrap.style.width=Math.max(40,W*s)+'px';wrap.style.height=Math.max(40,H*s)+'px';wrap.style.marginRight=wide?(padR-padL)+'px':'0'}
 new ResizeObserver(fit).observe(stage);
 
-// ---------- geometry ----------
-function rr(g,x,y,w,h,r){r=Math.max(0,Math.min(r,w/2,h/2));g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath()}
-function clearPath(g,scale){const cx=W/2,cy=H/2;scale=scale||1;
-  if(S.shape==='rect'){const w=S.clear/100*W*scale,h=S.clear/100*H*scale,rad=Math.min(w,h)*0.28;rr(g,cx-w/2,cy-h/2,w,h,rad)}
-  else{const base=Math.min(W,H)/2;const r=S.clear/100*base*scale;const sx=S.shape==='ellipse'?W/Math.min(W,H):1,sy=S.shape==='ellipse'?H/Math.min(W,H):1;
-    g.save();g.translate(cx,cy);g.scale(sx,sy);g.beginPath();g.arc(0,0,r,0,7);g.closePath();g.restore()}}
-
-// ---------- build layers ----------
+// ---------- crop + frost ----------
 function buildCrop(){const g=ctx(cropC);g.setTransform(1,0,0,1,0,0);g.filter='none';g.globalAlpha=1;g.clearRect(0,0,W,H);
   const s=Math.max(W/sw,H/sh)*S.zoom/100;const dw=sw*s,dh=sh*s;const ox=(W-dw)/2+S.panx/100*(dw-W)/2,oy=(H-dh)/2+S.pany/100*(dh-H)/2;
   g.imageSmoothingQuality='high';g.drawImage(srcC,ox,oy,dw,dh)}
 function buildBlur(){const g=ctx(blurC);g.setTransform(1,0,0,1,0,0);g.globalAlpha=1;g.clearRect(0,0,W,H);g.save();
-  const px=S.blur/100*Math.min(W,H)*0.06;if(px>0)g.filter=`blur(${px}px)`;g.drawImage(cropC,0,0);g.restore();
-  if(S.darken>0){g.save();g.globalAlpha=S.darken/100;g.fillStyle='#000';g.fillRect(0,0,W,H);g.restore()}}
-function buildMask(){const g=ctx(maskC);g.setTransform(1,0,0,1,0,0);g.globalCompositeOperation='source-over';g.globalAlpha=1;g.filter='none';g.clearRect(0,0,W,H);g.save();
-  const base=Math.min(W,H)/2;const fb=Math.max(0.5,S.feather/100*base*0.9);g.filter=`blur(${fb}px)`;g.fillStyle='#fff';clearPath(g);g.fill();g.restore()}
-function render(){if(!W)return;buildCrop();buildBlur();buildMask();
-  const g=ctx(view);g.setTransform(1,0,0,1,0,0);g.globalCompositeOperation='source-over';g.globalAlpha=1;g.filter='none';g.clearRect(0,0,W,H);
-  g.drawImage(blurC,0,0);
-  const t=ctx(tmpC);t.setTransform(1,0,0,1,0,0);t.globalCompositeOperation='source-over';t.globalAlpha=1;t.filter='none';t.clearRect(0,0,W,H);
-  const m=1+S.magnify/100;t.save();t.translate(W/2,H/2);t.scale(m,m);t.translate(-W/2,-H/2);t.drawImage(cropC,0,0);t.restore();
-  t.globalCompositeOperation='destination-in';t.drawImage(maskC,0,0);t.globalCompositeOperation='source-over';g.drawImage(tmpC,0,0);
-  if(S.gloss>0){const base=Math.min(W,H)/2;g.save();g.globalCompositeOperation='screen';g.globalAlpha=S.gloss/100*0.8;g.filter=`blur(${base*0.012}px)`;g.strokeStyle='#fff';g.lineWidth=Math.max(2,base*0.016);clearPath(g,1.0);g.stroke();g.restore();}
+  const px=Math.max(0.5,S.frost/100*Math.min(W,H)*0.055);g.filter=`blur(${px}px)`;g.drawImage(cropC,0,0);g.restore()}
+
+// ---------- geometry (clear-zone boundary) ----------
+function clearPath(g){const cx=W/2,cy=H/2;
+  if(S.shape==='rect'){const w=S.clear/100*W,h=S.clear/100*H,rad=Math.min(w,h)*0.28;const x=cx-w/2,y=cy-h/2;
+    g.beginPath();g.moveTo(x+rad,y);g.arcTo(x+w,y,x+w,y+h,rad);g.arcTo(x+w,y+h,x,y+h,rad);g.arcTo(x,y+h,x,y,rad);g.arcTo(x,y,x+w,y,rad);g.closePath()}
+  else{const base=Math.min(W,H)/2;const ax=S.shape==='ellipse'?S.clear/100*W/2:S.clear/100*base,ay=S.shape==='ellipse'?S.clear/100*H/2:S.clear/100*base;
+    g.save();g.translate(cx,cy);g.beginPath();g.ellipse(0,0,ax,ay,0,0,7);g.closePath();g.restore()}}
+
+// ---------- glass engine (refraction + specular + frost) ----------
+function sampleBi(d,x,y){if(x<0)x=0;else if(x>W-1)x=W-1;if(y<0)y=0;else if(y>H-1)y=H-1;
+  const x0=x|0,y0=y|0,x1=x0+1<W?x0+1:x0,y1=y0+1<H?y0+1:y0,fx=x-x0,fy=y-y0;
+  const i00=(y0*W+x0)*4,i10=(y0*W+x1)*4,i01=(y1*W+x0)*4,i11=(y1*W+x1)*4;
+  const w00=(1-fx)*(1-fy),w10=fx*(1-fy),w01=(1-fx)*fy,w11=fx*fy;
+  return [d[i00]*w00+d[i10]*w10+d[i01]*w01+d[i11]*w11,d[i00+1]*w00+d[i10+1]*w10+d[i01+1]*w01+d[i11+1]*w11,d[i00+2]*w00+d[i10+2]*w10+d[i01+2]*w01+d[i11+2]*w11]}
+function applyGlass(){
+  const src=ctx(cropC).getImageData(0,0,W,H).data,frost=ctx(blurC).getImageData(0,0,W,H).data;
+  const out=ctx(view).createImageData(W,H),o=out.data;
+  const cx=W/2,cy=H/2,baseR=Math.min(W,H)/2;
+  const rectMode=S.shape==='rect';
+  const hw=S.clear/100*W/2,hh=S.clear/100*H/2,rad=Math.min(hw,hh)*0.28,refR=Math.min(hw,hh);
+  const ax=S.shape==='ellipse'?S.clear/100*W/2:S.clear/100*baseR,ay=S.shape==='ellipse'?S.clear/100*H/2:S.clear/100*baseR;
+  const Lf=0.10+S.band/100*0.6;            // glass-lip thickness (field units)
+  const amp=S.refract/100*baseR*0.16;      // max displacement (px)
+  const chroma=S.chroma/100*0.5;
+  const lx=-0.55,ly=-0.83;                  // light direction (top-left)
+  for(let y=0;y<H;y++){for(let x=0;x<W;x++){const i=(y*W+x)*4;
+    let f,nxp,nyp;
+    if(rectMode){const qx=Math.abs(x-cx)-(hw-rad),qy=Math.abs(y-cy)-(hh-rad);const ex=Math.max(qx,0),ey=Math.max(qy,0);
+      const dist=Math.hypot(ex,ey)+Math.min(Math.max(qx,qy),0)-rad;f=1+dist/refR;
+      nxp=Math.sign(x-cx)*(ex||(qx>qy?1:0));nyp=Math.sign(y-cy)*(ey||(qy>=qx?1:0));const nl=Math.hypot(nxp,nyp)||1;nxp/=nl;nyp/=nl;}
+    else{const dx=(x-cx)/ax,dy=(y-cy)/ay;f=Math.hypot(dx,dy);let gx=(x-cx)/(ax*ax),gy=(y-cy)/(ay*ay);const gl=Math.hypot(gx,gy)||1;nxp=gx/gl;nyp=gy/gl;}
+    if(f<1){o[i]=src[i];o[i+1]=src[i+1];o[i+2]=src[i+2];o[i+3]=255;continue}
+    const u=f-1,tl=Math.min(u/Lf,1);
+    const prof=Math.sin(Math.PI*tl)*(1-tl*0.25);     // refraction ripple across the lip
+    const d=amp*prof;
+    let cr,cg,cb;
+    if(chroma>0){const rr=sampleBi(src,x-nxp*d*(1+chroma),y-nyp*d*(1+chroma)),gg=sampleBi(src,x-nxp*d,y-nyp*d),bb=sampleBi(src,x-nxp*d*(1-chroma),y-nyp*d*(1-chroma));cr=rr[0];cg=gg[1];cb=bb[2]}
+    else{const c=sampleBi(src,x-nxp*d,y-nyp*d);cr=c[0];cg=c[1];cb=c[2]}
+    if(u>Lf){const fb=sampleBi(frost,x,y),mixp=Math.min((u-Lf)/(Lf*1.1),1);cr+= (fb[0]-cr)*mixp;cg+=(fb[1]-cg)*mixp;cb+=(fb[2]-cb)*mixp}
+    // glass tint (cool, subtle)
+    const tn=S.tint/100*0.5*Math.min(1,u/Lf);cr+=(206-cr)*tn*0.25;cg+=(224-cg)*tn*0.25;cb+=(255-cb)*tn*0.25;
+    // specular band across the lip, facing the light
+    const spec=Math.pow(Math.max(0,nxp*lx+nyp*ly),1.5)*Math.max(0,1-Math.abs(tl-0.5)*2.0)*(S.gloss/100);
+    cr+=(255-cr)*spec;cg+=(255-cg)*spec;cb+=(255-cb)*spec;
+    // bright thin rim exactly on the boundary
+    const rim=Math.max(0,1-u/(Lf*0.22))*0.55*(S.gloss/100);cr+=(255-cr)*rim;cg+=(255-cg)*rim;cb+=(255-cb)*rim;
+    o[i]=cr;o[i+1]=cg;o[i+2]=cb;o[i+3]=255;
+  }}
+  ctx(view).putImageData(out,0,0)}
+
+function render(full){if(!W)return;buildCrop();
+  if(full){buildBlur();applyGlass()}
+  else{const g=ctx(view);g.setTransform(1,0,0,1,0,0);g.filter='none';g.globalAlpha=1;g.clearRect(0,0,W,H);g.drawImage(cropC,0,0)}
   overlay()}
 function overlay(){const g=ctx(ov);g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,W,H);if(!W)return;const sc=W/Math.max(1,wrap.clientWidth);
-  g.save();g.setLineDash([6*sc,5*sc]);g.lineWidth=1*sc;g.strokeStyle='rgba(255,255,255,.55)';clearPath(g);g.stroke();g.restore()}
-let raf=0;function schedule(){if(raf)return;raf=requestAnimationFrame(()=>{raf=0;render()})}
+  g.save();g.setLineDash([6*sc,5*sc]);g.lineWidth=1*sc;g.strokeStyle='rgba(255,255,255,.5)';clearPath(g);g.stroke();g.restore()}
+let raf=0,pendFull=false;
+function schedule(full){if(full)pendFull=true;if(raf)return;raf=requestAnimationFrame(()=>{raf=0;const f=pendFull;pendFull=false;render(f)})}
 
 // ---------- panel ----------
-function set(k,v){S[k]=v;if(k==='aspect'){recalc();sync();return}sync();schedule()}
+function set(k,v){S[k]=v;if(k==='aspect'){recalc();sync();return}sync();schedule(true)}
 const DEF=[
  ['Фото',[{t:'act',l:'файл',b:'Загрузить фото',f:()=>$('file').click()},{t:'meta'}]],
  ['Кроп',[{t:'sel',k:'aspect',l:'формат',o:[['orig','оригинал'],['1x1','1:1'],['4x5','4:5'],['3x4','3:4'],['9x16','9:16'],['16x9','16:9'],['3x2','3:2']]},
    {t:'rng',k:'zoom',l:'зум',min:100,max:400},
    {t:'rng',k:'panx',l:'сдвиг X',min:-100,max:100},
    {t:'rng',k:'pany',l:'сдвиг Y',min:-100,max:100}]],
- ['Эффект краёв',[{t:'sel',k:'shape',l:'зона',o:[['ellipse','эллипс'],['circle','круг'],['rect','прямоугольник']]},
-   {t:'rng',k:'clear',l:'чёткий центр',min:5,max:95},
-   {t:'rng',k:'feather',l:'переход',min:0,max:100},
-   {t:'rng',k:'blur',l:'сила размытия',min:0,max:100},
-   {t:'rng',k:'magnify',l:'лупа центра',min:0,max:40},
-   {t:'rng',k:'gloss',l:'блик-стекло',min:0,max:100},
-   {t:'rng',k:'darken',l:'затемнить края',min:0,max:60}]],
+ ['Стекло по краям',[{t:'sel',k:'shape',l:'зона',o:[['ellipse','эллипс'],['circle','круг'],['rect','прямоугольник']]},
+   {t:'rng',k:'clear',l:'чёткий центр',min:5,max:92},
+   {t:'rng',k:'band',l:'толщина стекла',min:5,max:100},
+   {t:'rng',k:'refract',l:'преломление',min:0,max:100},
+   {t:'rng',k:'frost',l:'матовость',min:0,max:100},
+   {t:'rng',k:'gloss',l:'блик',min:0,max:100},
+   {t:'rng',k:'chroma',l:'хроматика',min:0,max:100},
+   {t:'rng',k:'tint',l:'оттенок',min:0,max:100}]],
  ['Экспорт',[{t:'sel',k:'fmt',l:'формат',o:[['png','PNG'],['jpg','JPG'],['webp','WebP']]},
    {t:'rng',k:'q',l:'качество',min:40,max:100,dim:()=>S.fmt==='png'},
    {t:'sel',k:'preset',l:'размер',o:[['orig','как есть'],['1080x1080','1080×1080'],['1080x1350','1080×1350'],['1080x1920','1080×1920']]},
@@ -176,25 +214,24 @@ DEF.forEach(([title,items],fi)=>{const f=document.createElement('div');f.classNa
 function sync(){binds.forEach(f=>f());ov.style.cursor='move'}
 
 // ---------- pointer: pan ----------
-function imgPt(e){const r=ov.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}}
 let drag=null;
 ov.addEventListener('pointerdown',e=>{if(!W)return;ov.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,px:S.panx,py:S.pany,r:ov.getBoundingClientRect()}});
 ov.addEventListener('pointermove',e=>{if(!drag)return;const kx=200/Math.max(1,drag.r.width),ky=200/Math.max(1,drag.r.height);
-  S.panx=clamp(drag.px-(e.clientX-drag.x)*kx,-100,100);S.pany=clamp(drag.py-(e.clientY-drag.y)*ky,-100,100);sync();schedule()});
-const end=()=>{drag=null};ov.addEventListener('pointerup',end);ov.addEventListener('pointercancel',end);
+  S.panx=clamp(drag.px-(e.clientX-drag.x)*kx,-100,100);S.pany=clamp(drag.py-(e.clientY-drag.y)*ky,-100,100);sync();schedule(false)});
+const end=()=>{if(drag){drag=null;schedule(true)}};ov.addEventListener('pointerup',end);ov.addEventListener('pointercancel',end);
 
 // ---------- export ----------
 function blobOf(c,type,q){return new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('encode')),type,q))}
 async function save(blob,filename){const dl=dlP?await dlP.catch(()=>null):null;
   if(dl){try{await dl.save({filename,data:blob});toast('Сохранено')}catch(e){const c=e&&e.code;toast(c==='declined'?'Отменено':c==='rate_limited'?'Повторите через пару секунд':'Не удалось сохранить')}return}
   try{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}catch(e){toast('Скачивание недоступно')}}
-async function exportImg(){if(!W){toast('Сначала загрузите фото');return}render();
+async function exportImg(){if(!W){toast('Сначала загрузите фото');return}render(true);
   let out=view;
   if(S.preset!=='orig'){const [tw,th]=S.preset.split('x').map(Number);const a=tw/th;let cw,ch;if(W/H>a){ch=H;cw=H*a}else{cw=W;ch=W/a}
     const x=(W-cw)/2,y=(H-ch)/2;out=mk();out.width=tw;out.height=th;const g=ctx(out);g.imageSmoothingQuality='high';g.drawImage(view,x,y,cw,ch,0,0,tw,th)}
   if(S.fmt==='jpg'){const fC=mk();fC.width=out.width;fC.height=out.height;const g=ctx(fC);g.fillStyle='#000';g.fillRect(0,0,fC.width,fC.height);g.drawImage(out,0,0);out=fC}
   const type={png:'image/png',jpg:'image/jpeg',webp:'image/webp'}[S.fmt];
-  try{await save(await blobOf(out,type,S.q/100),`${fileBase}-edgefocus-${out.width}x${out.height}.${S.fmt}`)}catch(e){toast('Не удалось собрать файл')}}
+  try{await save(await blobOf(out,type,S.q/100),`${fileBase}-glassedge-${out.width}x${out.height}.${S.fmt}`)}catch(e){toast('Не удалось собрать файл')}}
 
 // first open
 setImage(sample(),null);sync();
