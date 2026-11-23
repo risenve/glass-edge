@@ -46,6 +46,7 @@ select{background:var(--btn);color:var(--btn-fg);font-weight:600;cursor:pointer;
 button.b{font:inherit;font-weight:600;color:var(--btn-fg);background:var(--btn);border:0;border-radius:3px;height:22px;padding:0 8px;cursor:pointer;width:100%}
 button.b:hover,select:hover{filter:brightness(1.08)}
 button.b:active{filter:brightness(.92)}
+.ck{width:14px;height:14px;margin:0;accent-color:var(--knob);cursor:pointer}
 .r.dim{opacity:.35;pointer-events:none}
 :focus-visible{outline:1px solid var(--accent);outline-offset:1px}
 .meta{color:var(--muted);padding:2px 10px 4px;font-size:11px}
@@ -65,21 +66,26 @@ button.b:active{filter:brightness(.92)}
 </div>
 <div class="pane" id="pane"></div>
 <input id="file" type="file" accept="image/*" hidden>
+<input id="svg" type="file" accept=".svg,image/svg+xml" hidden>
 <div class="toast" id="toast" role="status"></div>
 
 <script>
 (()=>{
-const S={aspect:'1x1',zoom:120,panx:0,pany:0,
+const S={aspect:'4x5',zoom:120,panx:0,pany:0,
+  inFig:true,fig:'squircle',figSize:88,
   shape:'ellipse',clear:46,band:46,refract:62,frost:40,gloss:50,chroma:14,tint:8,
   fmt:'png',q:92,preset:'orig'};
 const MAXSIDE=3200,OUTLONG=1440;
+// default figure (squircle) — embedded from Vector.svg
+const SQ_D="M1264.04 155.965C1164.16 56.1018 1028.73 0 887.5 0L710 0L532.5 0C391.269 0 255.837 56.1018 155.963 155.965C56.1096 255.829 0 391.273 0 532.5L0 1242.5C0 1383.73 56.1096 1519.17 155.963 1619.03C255.837 1718.9 391.269 1775 532.5 1775H710H887.5C1028.73 1775 1164.16 1718.9 1264.04 1619.03C1363.89 1519.17 1420 1383.73 1420 1242.5V532.5C1420 391.273 1363.89 255.829 1264.04 155.965Z";
+const SQW=1420,SQH=1775,SQP=new Path2D(SQ_D);
 const $=id=>document.getElementById(id);
 const mk=()=>document.createElement('canvas');
 const view=$('view'),ov=$('ov'),wrap=$('wrap'),stage=$('stage'),pane=$('pane');
-const srcC=mk(),cropC=mk(),blurC=mk(),tmpC=mk();
+const srcC=mk(),cropC=mk(),blurC=mk(),tmpC=mk(),figC=mk(),fieldC=mk();
 const ctx=c=>c.getContext('2d');
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-let sw=0,sh=0,W=0,H=0,fileBase='photo';
+let sw=0,sh=0,W=0,H=0,fileBase='photo',customSil=null;
 let dlP=null;try{dlP=window.claude&&window.claude.use?window.claude.use('downloads'):null}catch(e){dlP=null}
 let tt;function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),2200)}
 
@@ -94,16 +100,21 @@ function sample(){const c=mk();c.width=1600;c.height=1600;const g=ctx(c);g.fillS
 // ---------- image io ----------
 function recalc(){if(!sw)return;let a;if(S.aspect==='orig')a=sw/sh;else{const [aw,ah]=S.aspect.split('x').map(Number);a=aw/ah}
   if(a>=1){W=OUTLONG;H=Math.round(OUTLONG/a)}else{H=OUTLONG;W=Math.round(OUTLONG*a)}
-  for(const c of [cropC,blurC,tmpC,view,ov]){c.width=W;c.height=H}
+  for(const c of [cropC,blurC,tmpC,figC,fieldC,view,ov]){c.width=W;c.height=H}
   const m=$('meta');if(m)m.textContent=sw+'×'+sh+'  →  '+W+'×'+H;fit();schedule(true)}
 function setImage(img,name){let w=img.naturalWidth||img.width,h=img.naturalHeight||img.height;const k=Math.min(1,MAXSIDE/Math.max(w,h));sw=Math.round(w*k);sh=Math.round(h*k);
   srcC.width=sw;srcC.height=sh;ctx(srcC).drawImage(img,0,0,sw,sh);if(name)fileBase=name.replace(/\.[^.]+$/,'').slice(0,60)||'photo';recalc()}
 function loadFile(f){if(!f||!f.type.startsWith('image/')){toast('Нужен JPG, PNG или WebP');return}
   const url=URL.createObjectURL(f);const im=new Image();im.onload=()=>{setImage(im,f.name);URL.revokeObjectURL(url)};im.onerror=()=>toast('Файл не открылся (HEIC → JPG)');im.src=url}
+function loadSVG(f){if(!f)return;const url=URL.createObjectURL(f);const im=new Image();
+  im.onload=()=>{const s=600,c=mk();c.width=c.height=s;const g=ctx(c);const iw=im.width||300,ih=im.height||300;const k=Math.min(s/iw,s/ih)*0.98;const dw=iw*k,dh=ih*k;
+    g.drawImage(im,(s-dw)/2,(s-dh)/2,dw,dh);g.globalCompositeOperation='source-in';g.fillStyle='#fff';g.fillRect(0,0,s,s);customSil=c;S.fig='custom';S.inFig=true;URL.revokeObjectURL(url);sync();schedule(true);toast('SVG — фигура')};
+  im.onerror=()=>{URL.revokeObjectURL(url);toast('SVG не открылся')};im.src=url}
 $('file').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value=''});
+$('svg').addEventListener('change',e=>{loadSVG(e.target.files[0]);e.target.value=''});
 stage.addEventListener('dragover',e=>{e.preventDefault();stage.classList.add('dragging')});
 stage.addEventListener('dragleave',()=>stage.classList.remove('dragging'));
-stage.addEventListener('drop',e=>{e.preventDefault();stage.classList.remove('dragging');loadFile(e.dataTransfer.files[0])});
+stage.addEventListener('drop',e=>{e.preventDefault();stage.classList.remove('dragging');const f=e.dataTransfer.files[0];if(f&&f.type.includes('svg'))loadSVG(f);else loadFile(f)});
 window.addEventListener('paste',e=>{const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith('image/'));if(it)loadFile(it.getAsFile())});
 function fit(){if(!W)return;const r=stage.getBoundingClientRect();const wide=window.innerWidth>760;const padR=wide?pane.offsetWidth+36:16,padL=wide?36:16,padY=wide?36:16;
   const s=Math.min((r.width-padL-padR)/W,(r.height-padY*2)/H);wrap.style.width=Math.max(40,W*s)+'px';wrap.style.height=Math.max(40,H*s)+'px';wrap.style.marginRight=wide?(padR-padL)+'px':'0'}
@@ -116,61 +127,90 @@ function buildCrop(){const g=ctx(cropC);g.setTransform(1,0,0,1,0,0);g.filter='no
 function buildBlur(){const g=ctx(blurC);g.setTransform(1,0,0,1,0,0);g.globalAlpha=1;g.clearRect(0,0,W,H);g.save();
   const px=Math.max(0.5,S.frost/100*Math.min(W,H)*0.055);g.filter=`blur(${px}px)`;g.drawImage(cropC,0,0);g.restore()}
 
-// ---------- geometry (clear-zone boundary) ----------
+function rr(g,x,y,w,h,r){r=Math.max(0,Math.min(r,w/2,h/2));g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath()}
+
+// ---------- figure ----------
+function fillFigure(g){const cx=W/2,cy=H/2,s=S.figSize/100;
+  if(S.fig==='circle'){g.beginPath();g.arc(cx,cy,Math.min(W,H)/2*s,0,7);g.fill()}
+  else if(S.fig==='ellipse'){g.beginPath();g.ellipse(cx,cy,W/2*s,H/2*s,0,0,7);g.fill()}
+  else if(S.fig==='rrect'){const w=W*s,h=H*s;rr(g,cx-w/2,cy-h/2,w,h,Math.min(w,h)*0.14);g.fill()}
+  else if(S.fig==='custom'&&customSil){const k=s*Math.min(W,H)/600,dw=600*k,dh=600*k;g.drawImage(customSil,cx-dw/2,cy-dh/2,dw,dh)}
+  else{const k=Math.min(W/SQW,H/SQH)*s,dw=SQW*k,dh=SQH*k;g.save();g.translate(cx-dw/2,cy-dh/2);g.scale(k,k);g.fill(SQP);g.restore()}}
+function strokeFigure(g,lw){const cx=W/2,cy=H/2,s=S.figSize/100;
+  if(S.fig==='circle'){g.beginPath();g.arc(cx,cy,Math.min(W,H)/2*s,0,7);g.stroke()}
+  else if(S.fig==='ellipse'){g.beginPath();g.ellipse(cx,cy,W/2*s,H/2*s,0,0,7);g.stroke()}
+  else if(S.fig==='rrect'){const w=W*s,h=H*s;rr(g,cx-w/2,cy-h/2,w,h,Math.min(w,h)*0.14);g.stroke()}
+  else if(S.fig==='custom'&&customSil){const k=s*Math.min(W,H)/600,dw=600*k,dh=600*k;g.strokeRect(cx-dw/2,cy-dh/2,dw,dh)}
+  else{const k=Math.min(W/SQW,H/SQH)*s,dw=SQW*k,dh=SQH*k;g.save();g.translate(cx-dw/2,cy-dh/2);g.scale(k,k);g.lineWidth=lw/k;g.stroke(SQP);g.restore()}}
+function bandPx(){return Math.max(1.5,S.band/100*Math.min(W,H)*0.16)}
+function buildFigure(){const g=ctx(figC);g.setTransform(1,0,0,1,0,0);g.globalAlpha=1;g.filter='none';g.clearRect(0,0,W,H);g.fillStyle='#fff';fillFigure(g);
+  const g2=ctx(fieldC);g2.setTransform(1,0,0,1,0,0);g2.globalAlpha=1;g2.clearRect(0,0,W,H);g2.save();g2.filter=`blur(${bandPx()}px)`;g2.drawImage(figC,0,0);g2.restore()}
+
+// ---------- geometry (non-figure clear zone) ----------
 function clearPath(g){const cx=W/2,cy=H/2;
-  if(S.shape==='rect'){const w=S.clear/100*W,h=S.clear/100*H,rad=Math.min(w,h)*0.28;const x=cx-w/2,y=cy-h/2;
+  if(S.shape==='rect'){const w=S.clear/100*W,h=S.clear/100*H,rad=Math.min(w,h)*0.28,x=cx-w/2,y=cy-h/2;
     g.beginPath();g.moveTo(x+rad,y);g.arcTo(x+w,y,x+w,y+h,rad);g.arcTo(x+w,y+h,x,y+h,rad);g.arcTo(x,y+h,x,y,rad);g.arcTo(x,y,x+w,y,rad);g.closePath()}
-  else{const base=Math.min(W,H)/2;const ax=S.shape==='ellipse'?S.clear/100*W/2:S.clear/100*base,ay=S.shape==='ellipse'?S.clear/100*H/2:S.clear/100*base;
+  else{const base=Math.min(W,H)/2,ax=S.shape==='ellipse'?S.clear/100*W/2:S.clear/100*base,ay=S.shape==='ellipse'?S.clear/100*H/2:S.clear/100*base;
     g.save();g.translate(cx,cy);g.beginPath();g.ellipse(0,0,ax,ay,0,0,7);g.closePath();g.restore()}}
 
-// ---------- glass engine (refraction + specular + frost) ----------
+// ---------- glass sampling ----------
 function sampleBi(d,x,y){if(x<0)x=0;else if(x>W-1)x=W-1;if(y<0)y=0;else if(y>H-1)y=H-1;
   const x0=x|0,y0=y|0,x1=x0+1<W?x0+1:x0,y1=y0+1<H?y0+1:y0,fx=x-x0,fy=y-y0;
   const i00=(y0*W+x0)*4,i10=(y0*W+x1)*4,i01=(y1*W+x0)*4,i11=(y1*W+x1)*4;
   const w00=(1-fx)*(1-fy),w10=fx*(1-fy),w01=(1-fx)*fy,w11=fx*fy;
   return [d[i00]*w00+d[i10]*w10+d[i01]*w01+d[i11]*w11,d[i00+1]*w00+d[i10+1]*w10+d[i01+1]*w01+d[i11+1]*w11,d[i00+2]*w00+d[i10+2]*w10+d[i01+2]*w01+d[i11+2]*w11]}
-function applyGlass(){
+
+// glass to canvas edges, clear central zone (non-figure)
+function applyGlassZone(){
   const src=ctx(cropC).getImageData(0,0,W,H).data,frost=ctx(blurC).getImageData(0,0,W,H).data;
-  const out=ctx(view).createImageData(W,H),o=out.data;
-  const cx=W/2,cy=H/2,baseR=Math.min(W,H)/2;
-  const rectMode=S.shape==='rect';
-  const hw=S.clear/100*W/2,hh=S.clear/100*H/2,rad=Math.min(hw,hh)*0.28,refR=Math.min(hw,hh);
+  const out=ctx(view).createImageData(W,H),o=out.data;const cx=W/2,cy=H/2,baseR=Math.min(W,H)/2;
+  const rectMode=S.shape==='rect';const hw=S.clear/100*W/2,hh=S.clear/100*H/2,rad=Math.min(hw,hh)*0.28,refR=Math.min(hw,hh);
   const ax=S.shape==='ellipse'?S.clear/100*W/2:S.clear/100*baseR,ay=S.shape==='ellipse'?S.clear/100*H/2:S.clear/100*baseR;
-  const Lf=0.10+S.band/100*0.6;            // glass-lip thickness (field units)
-  const amp=S.refract/100*baseR*0.16;      // max displacement (px)
-  const chroma=S.chroma/100*0.5;
-  const lx=-0.55,ly=-0.83;                  // light direction (top-left)
-  for(let y=0;y<H;y++){for(let x=0;x<W;x++){const i=(y*W+x)*4;
-    let f,nxp,nyp;
-    if(rectMode){const qx=Math.abs(x-cx)-(hw-rad),qy=Math.abs(y-cy)-(hh-rad);const ex=Math.max(qx,0),ey=Math.max(qy,0);
-      const dist=Math.hypot(ex,ey)+Math.min(Math.max(qx,qy),0)-rad;f=1+dist/refR;
-      nxp=Math.sign(x-cx)*(ex||(qx>qy?1:0));nyp=Math.sign(y-cy)*(ey||(qy>=qx?1:0));const nl=Math.hypot(nxp,nyp)||1;nxp/=nl;nyp/=nl;}
-    else{const dx=(x-cx)/ax,dy=(y-cy)/ay;f=Math.hypot(dx,dy);let gx=(x-cx)/(ax*ax),gy=(y-cy)/(ay*ay);const gl=Math.hypot(gx,gy)||1;nxp=gx/gl;nyp=gy/gl;}
+  const Lf=0.10+S.band/100*0.6,amp=S.refract/100*baseR*0.16,chroma=S.chroma/100*0.5,lx=-0.55,ly=-0.83;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=(y*W+x)*4;let f,nxp,nyp;
+    if(rectMode){const qx=Math.abs(x-cx)-(hw-rad),qy=Math.abs(y-cy)-(hh-rad),ex=Math.max(qx,0),ey=Math.max(qy,0);const dist=Math.hypot(ex,ey)+Math.min(Math.max(qx,qy),0)-rad;f=1+dist/refR;
+      nxp=Math.sign(x-cx)*(ex||(qx>qy?1:0));nyp=Math.sign(y-cy)*(ey||(qy>=qx?1:0));const nl=Math.hypot(nxp,nyp)||1;nxp/=nl;nyp/=nl}
+    else{const dx=(x-cx)/ax,dy=(y-cy)/ay;f=Math.hypot(dx,dy);let gx=(x-cx)/(ax*ax),gy=(y-cy)/(ay*ay);const gl=Math.hypot(gx,gy)||1;nxp=gx/gl;nyp=gy/gl}
     if(f<1){o[i]=src[i];o[i+1]=src[i+1];o[i+2]=src[i+2];o[i+3]=255;continue}
-    const u=f-1,tl=Math.min(u/Lf,1);
-    const prof=Math.sin(Math.PI*tl)*(1-tl*0.25);     // refraction ripple across the lip
-    const d=amp*prof;
-    let cr,cg,cb;
+    const u=f-1,tl=Math.min(u/Lf,1),prof=Math.sin(Math.PI*tl)*(1-tl*0.25),d=amp*prof;let cr,cg,cb;
     if(chroma>0){const rr=sampleBi(src,x-nxp*d*(1+chroma),y-nyp*d*(1+chroma)),gg=sampleBi(src,x-nxp*d,y-nyp*d),bb=sampleBi(src,x-nxp*d*(1-chroma),y-nyp*d*(1-chroma));cr=rr[0];cg=gg[1];cb=bb[2]}
     else{const c=sampleBi(src,x-nxp*d,y-nyp*d);cr=c[0];cg=c[1];cb=c[2]}
-    if(u>Lf){const fb=sampleBi(frost,x,y),mixp=Math.min((u-Lf)/(Lf*1.1),1);cr+= (fb[0]-cr)*mixp;cg+=(fb[1]-cg)*mixp;cb+=(fb[2]-cb)*mixp}
-    // glass tint (cool, subtle)
+    if(u>Lf){const fb=sampleBi(frost,x,y),mixp=Math.min((u-Lf)/(Lf*1.1),1);cr+=(fb[0]-cr)*mixp;cg+=(fb[1]-cg)*mixp;cb+=(fb[2]-cb)*mixp}
     const tn=S.tint/100*0.5*Math.min(1,u/Lf);cr+=(206-cr)*tn*0.25;cg+=(224-cg)*tn*0.25;cb+=(255-cb)*tn*0.25;
-    // specular band across the lip, facing the light
-    const spec=Math.pow(Math.max(0,nxp*lx+nyp*ly),1.5)*Math.max(0,1-Math.abs(tl-0.5)*2.0)*(S.gloss/100);
-    cr+=(255-cr)*spec;cg+=(255-cg)*spec;cb+=(255-cb)*spec;
-    // bright thin rim exactly on the boundary
+    const spec=Math.pow(Math.max(0,nxp*lx+nyp*ly),1.5)*Math.max(0,1-Math.abs(tl-0.5)*2)*(S.gloss/100);cr+=(255-cr)*spec;cg+=(255-cg)*spec;cb+=(255-cb)*spec;
     const rim=Math.max(0,1-u/(Lf*0.22))*0.55*(S.gloss/100);cr+=(255-cr)*rim;cg+=(255-cg)*rim;cb+=(255-cb)*rim;
-    o[i]=cr;o[i+1]=cg;o[i+2]=cb;o[i+3]=255;
-  }}
+    o[i]=cr;o[i+1]=cg;o[i+2]=cb;o[i+3]=255}
+  ctx(view).putImageData(out,0,0)}
+
+// glass along the INSIDE edge of a figure; outside the figure is transparent
+function applyGlassFig(){
+  const src=ctx(cropC).getImageData(0,0,W,H).data,frost=ctx(blurC).getImageData(0,0,W,H).data;
+  const field=ctx(fieldC).getImageData(0,0,W,H).data,mask=ctx(figC).getImageData(0,0,W,H).data;
+  const out=ctx(view).createImageData(W,H),o=out.data;
+  const R=bandPx(),amp=S.refract/100*R*0.9,chroma=S.chroma/100*0.5,lx=-0.55,ly=-0.83,L=0.90;
+  const fa=(x,y)=>field[((y<0?0:y>H-1?H-1:y)*W+(x<0?0:x>W-1?W-1:x))*4+3];
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=(y*W+x)*4;const ma=mask[i+3];if(ma===0){o[i+3]=0;continue}
+    const a=field[i+3]/255;
+    if(a>=0.985){o[i]=src[i];o[i+1]=src[i+1];o[i+2]=src[i+2];o[i+3]=ma;continue}
+    let gx=fa(x+1,y)-fa(x-1,y),gy=fa(x,y+1)-fa(x,y-1);const gl=Math.hypot(gx,gy)||1;const inx=gx/gl,iny=gy/gl;// inward normal
+    const t=Math.min(a/L,1),prof=Math.sin(Math.PI*t)*(1-t*0.2),d=amp*prof;let cr,cg,cb;
+    if(chroma>0){const rr=sampleBi(src,x+inx*d*(1+chroma),y+iny*d*(1+chroma)),gg=sampleBi(src,x+inx*d,y+iny*d),bb=sampleBi(src,x+inx*d*(1-chroma),y+iny*d*(1-chroma));cr=rr[0];cg=gg[1];cb=bb[2]}
+    else{const c=sampleBi(src,x+inx*d,y+iny*d);cr=c[0];cg=c[1];cb=c[2]}
+    const mixp=(1-t)*(S.frost/100),fb=sampleBi(frost,x,y);cr+=(fb[0]-cr)*mixp;cg+=(fb[1]-cg)*mixp;cb+=(fb[2]-cb)*mixp;
+    const tn=S.tint/100*0.28*(1-t);cr+=(206-cr)*tn;cg+=(224-cg)*tn;cb+=(255-cb)*tn;
+    const spec=Math.pow(Math.max(0,-inx*lx-iny*ly),1.5)*Math.max(0,1-Math.abs(t-0.5)*2)*(S.gloss/100);cr+=(255-cr)*spec;cg+=(255-cg)*spec;cb+=(255-cb)*spec;
+    const rim=Math.max(0,1-t/0.22)*0.5*(S.gloss/100);cr+=(255-cr)*rim;cg+=(255-cg)*rim;cb+=(255-cb)*rim;
+    o[i]=cr;o[i+1]=cg;o[i+2]=cb;o[i+3]=ma}
   ctx(view).putImageData(out,0,0)}
 
 function render(full){if(!W)return;buildCrop();
-  if(full){buildBlur();applyGlass()}
-  else{const g=ctx(view);g.setTransform(1,0,0,1,0,0);g.filter='none';g.globalAlpha=1;g.clearRect(0,0,W,H);g.drawImage(cropC,0,0)}
+  if(full){buildBlur();if(S.inFig){buildFigure();applyGlassFig()}else applyGlassZone()}
+  else{const g=ctx(view);g.setTransform(1,0,0,1,0,0);g.filter='none';g.globalAlpha=1;g.clearRect(0,0,W,H);
+    if(S.inFig){ctx(tmpC).clearRect(0,0,W,H);ctx(tmpC).drawImage(cropC,0,0);const t=ctx(tmpC);t.globalCompositeOperation='destination-in';ctx(figC).clearRect(0,0,W,H);ctx(figC).fillStyle='#fff';fillFigure(ctx(figC));t.drawImage(figC,0,0);t.globalCompositeOperation='source-over';g.drawImage(tmpC,0,0)}
+    else g.drawImage(cropC,0,0)}
   overlay()}
 function overlay(){const g=ctx(ov);g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,W,H);if(!W)return;const sc=W/Math.max(1,wrap.clientWidth);
-  g.save();g.setLineDash([6*sc,5*sc]);g.lineWidth=1*sc;g.strokeStyle='rgba(255,255,255,.5)';clearPath(g);g.stroke();g.restore()}
+  g.save();g.setLineDash([6*sc,5*sc]);g.lineWidth=1*sc;g.strokeStyle='rgba(255,255,255,.5)';if(S.inFig)strokeFigure(g,1*sc);else clearPath(g),g.stroke();g.restore()}
 let raf=0,pendFull=false;
 function schedule(full){if(full)pendFull=true;if(raf)return;raf=requestAnimationFrame(()=>{raf=0;const f=pendFull;pendFull=false;render(f)})}
 
@@ -182,15 +222,19 @@ const DEF=[
    {t:'rng',k:'zoom',l:'зум',min:100,max:400},
    {t:'rng',k:'panx',l:'сдвиг X',min:-100,max:100},
    {t:'rng',k:'pany',l:'сдвиг Y',min:-100,max:100}]],
- ['Стекло по краям',[{t:'sel',k:'shape',l:'зона',o:[['ellipse','эллипс'],['circle','круг'],['rect','прямоугольник']]},
-   {t:'rng',k:'clear',l:'чёткий центр',min:5,max:92},
+ ['Фигура',[{t:'chk',k:'inFig',l:'эффект в фигуре'},
+   {t:'sel',k:'fig',l:'фигура',o:[['squircle','скруглённая'],['rrect','прямоугольник'],['circle','круг'],['ellipse','овал'],['custom','свой SVG']],dim:()=>!S.inFig},
+   {t:'act',l:'свой SVG',b:'Загрузить SVG',f:()=>$('svg').click()},
+   {t:'rng',k:'figSize',l:'размер фигуры',min:30,max:100,dim:()=>!S.inFig}]],
+ ['Стекло по краям',[{t:'sel',k:'shape',l:'зона (без фигуры)',o:[['ellipse','эллипс'],['circle','круг'],['rect','прямоугольник']],dim:()=>S.inFig},
+   {t:'rng',k:'clear',l:'чёткий центр',min:5,max:92,dim:()=>S.inFig},
    {t:'rng',k:'band',l:'толщина стекла',min:5,max:100},
    {t:'rng',k:'refract',l:'преломление',min:0,max:100},
    {t:'rng',k:'frost',l:'матовость',min:0,max:100},
    {t:'rng',k:'gloss',l:'блик',min:0,max:100},
    {t:'rng',k:'chroma',l:'хроматика',min:0,max:100},
    {t:'rng',k:'tint',l:'оттенок',min:0,max:100}]],
- ['Экспорт',[{t:'sel',k:'fmt',l:'формат',o:[['png','PNG'],['jpg','JPG'],['webp','WebP']]},
+ ['Экспорт',[{t:'sel',k:'fmt',l:'формат',o:[['png','PNG (прозрачность)'],['jpg','JPG'],['webp','WebP']]},
    {t:'rng',k:'q',l:'качество',min:40,max:100,dim:()=>S.fmt==='png'},
    {t:'sel',k:'preset',l:'размер',o:[['orig','как есть'],['1080x1080','1080×1080'],['1080x1350','1080×1350'],['1080x1920','1080×1920']]},
    {t:'act',l:'готово',b:'Скачать',f:()=>exportImg()}]]];
@@ -202,6 +246,7 @@ DEF.forEach(([title,items],fi)=>{const f=document.createElement('div');f.classNa
     if(it.t==='meta'){r=document.createElement('div');r.className='meta';r.id='meta';r.textContent='загрузите фото';b.appendChild(r);return}
     r=row(it.l);b.appendChild(r);const id='c'+(uid++);r.querySelector('span').id=id+'l';
     if(it.t==='act'){const x=document.createElement('button');x.className='b';x.textContent=it.b;x.id=id;x.onclick=it.f;r.appendChild(x)}
+    else if(it.t==='chk'){const c=document.createElement('input');c.type='checkbox';c.className='ck';c.id=id;c.setAttribute('aria-labelledby',id+'l');c.onchange=()=>set(it.k,c.checked);r.appendChild(c);binds.push(()=>{c.checked=!!S[it.k]})}
     else if(it.t==='rng'){const w=document.createElement('div');w.className='sl';const s=document.createElement('input');s.type='range';s.min=it.min;s.max=it.max;s.step=it.st||1;s.id=id;s.setAttribute('aria-labelledby',id+'l');
       const n=document.createElement('input');n.type='number';n.min=it.min;n.max=it.max;n.step=it.st||1;n.id=id+'n';n.setAttribute('aria-labelledby',id+'l');
       s.oninput=()=>set(it.k,+s.value);n.onchange=()=>set(it.k,clamp(+n.value||0,it.min,it.max));w.append(s,n);r.appendChild(w);
@@ -209,7 +254,7 @@ DEF.forEach(([title,items],fi)=>{const f=document.createElement('div');f.classNa
     else if(it.t==='sel'){const s=document.createElement('select');s.id=id;s.setAttribute('aria-labelledby',id+'l');it.o.forEach(([v,l])=>{const o=document.createElement('option');o.value=v;o.textContent=l;s.appendChild(o)});s.onchange=()=>set(it.k,s.value);r.appendChild(s);
       binds.push(()=>{s.value=S[it.k];r.classList.toggle('dim',!!(it.dim&&it.dim()))})}
   });
-  if(fi>=3&&window.innerWidth<=760)f.classList.add('closed');
+  if(fi>=4&&window.innerWidth<=760)f.classList.add('closed');
 });
 function sync(){binds.forEach(f=>f());ov.style.cursor='move'}
 
