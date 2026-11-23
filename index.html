@@ -71,9 +71,9 @@ button.b:active{filter:brightness(.92)}
 
 <script>
 (()=>{
-const S={aspect:'4x5',zoom:120,panx:0,pany:0,
-  inFig:true,fig:'squircle',figSize:88,
-  shape:'ellipse',clear:46,band:46,refract:62,frost:40,gloss:50,chroma:14,tint:8,
+const S={aspect:'orig',zoom:100,panx:0,pany:0,
+  mode:'overlay',fig:'squircle',figSize:68,
+  shape:'ellipse',clear:46,band:46,refract:60,frost:28,gloss:55,chroma:16,tint:10,
   fmt:'png',q:92,preset:'orig'};
 const MAXSIDE=3200,OUTLONG=1440;
 // default figure (squircle) — embedded from Vector.svg
@@ -108,7 +108,7 @@ function loadFile(f){if(!f||!f.type.startsWith('image/')){toast('Нужен JPG,
   const url=URL.createObjectURL(f);const im=new Image();im.onload=()=>{setImage(im,f.name);URL.revokeObjectURL(url)};im.onerror=()=>toast('Файл не открылся (HEIC → JPG)');im.src=url}
 function loadSVG(f){if(!f)return;const url=URL.createObjectURL(f);const im=new Image();
   im.onload=()=>{const s=600,c=mk();c.width=c.height=s;const g=ctx(c);const iw=im.width||300,ih=im.height||300;const k=Math.min(s/iw,s/ih)*0.98;const dw=iw*k,dh=ih*k;
-    g.drawImage(im,(s-dw)/2,(s-dh)/2,dw,dh);g.globalCompositeOperation='source-in';g.fillStyle='#fff';g.fillRect(0,0,s,s);customSil=c;S.fig='custom';S.inFig=true;URL.revokeObjectURL(url);sync();schedule(true);toast('SVG — фигура')};
+    g.drawImage(im,(s-dw)/2,(s-dh)/2,dw,dh);g.globalCompositeOperation='source-in';g.fillStyle='#fff';g.fillRect(0,0,s,s);customSil=c;S.fig='custom';S.mode='overlay';URL.revokeObjectURL(url);sync();schedule(true);toast('SVG — фигура')};
   im.onerror=()=>{URL.revokeObjectURL(url);toast('SVG не открылся')};im.src=url}
 $('file').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value=''});
 $('svg').addEventListener('change',e=>{loadSVG(e.target.files[0]);e.target.value=''});
@@ -182,35 +182,34 @@ function applyGlassZone(){
     o[i]=cr;o[i+1]=cg;o[i+2]=cb;o[i+3]=255}
   ctx(view).putImageData(out,0,0)}
 
-// glass along the INSIDE edge of a figure; outside the figure is transparent
-function applyGlassFig(){
+// glass FIGURE sitting on top of the full photo (liquid-glass window)
+function applyGlassOverlay(){
+  const g=ctx(view);g.setTransform(1,0,0,1,0,0);g.filter='none';g.globalAlpha=1;g.clearRect(0,0,W,H);g.drawImage(cropC,0,0);
   const src=ctx(cropC).getImageData(0,0,W,H).data,frost=ctx(blurC).getImageData(0,0,W,H).data;
   const field=ctx(fieldC).getImageData(0,0,W,H).data,mask=ctx(figC).getImageData(0,0,W,H).data;
-  const out=ctx(view).createImageData(W,H),o=out.data;
-  const R=bandPx(),amp=S.refract/100*R*0.9,chroma=S.chroma/100*0.5,lx=-0.55,ly=-0.83,L=0.90;
+  const lay=ctx(tmpC).createImageData(W,H),o=lay.data;
+  const cx=W/2,cy=H/2,R=bandPx(),amp=S.refract/100*R*1.15,mag=S.refract/100*0.05,chroma=S.chroma/100*0.5,lx=-0.55,ly=-0.83,L=0.9;
   const fa=(x,y)=>field[((y<0?0:y>H-1?H-1:y)*W+(x<0?0:x>W-1?W-1:x))*4+3];
   for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=(y*W+x)*4;const ma=mask[i+3];if(ma===0){o[i+3]=0;continue}
     const a=field[i+3]/255;
-    if(a>=0.985){o[i]=src[i];o[i+1]=src[i+1];o[i+2]=src[i+2];o[i+3]=ma;continue}
-    let gx=fa(x+1,y)-fa(x-1,y),gy=fa(x,y+1)-fa(x,y-1);const gl=Math.hypot(gx,gy)||1;const inx=gx/gl,iny=gy/gl;// inward normal
-    const t=Math.min(a/L,1),prof=Math.sin(Math.PI*t)*(1-t*0.2),d=amp*prof;let cr,cg,cb;
-    if(chroma>0){const rr=sampleBi(src,x+inx*d*(1+chroma),y+iny*d*(1+chroma)),gg=sampleBi(src,x+inx*d,y+iny*d),bb=sampleBi(src,x+inx*d*(1-chroma),y+iny*d*(1-chroma));cr=rr[0];cg=gg[1];cb=bb[2]}
-    else{const c=sampleBi(src,x+inx*d,y+iny*d);cr=c[0];cg=c[1];cb=c[2]}
-    const mixp=(1-t)*(S.frost/100),fb=sampleBi(frost,x,y);cr+=(fb[0]-cr)*mixp;cg+=(fb[1]-cg)*mixp;cb+=(fb[2]-cb)*mixp;
-    const tn=S.tint/100*0.28*(1-t);cr+=(206-cr)*tn;cg+=(224-cg)*tn;cb+=(255-cb)*tn;
+    let gx=fa(x+1,y)-fa(x-1,y),gy=fa(x,y+1)-fa(x,y-1);const gn=Math.hypot(gx,gy)||1;const inx=gx/gn,iny=gy/gn;// inward normal
+    const t=Math.min(a/L,1),prof=Math.sin(Math.PI*t)*(1-t*0.15),d=amp*prof;
+    const sxb=cx+(x-cx)*(1-mag),syb=cy+(y-cy)*(1-mag);let cr,cg,cb;
+    if(chroma>0){const rr=sampleBi(src,sxb+inx*d*(1+chroma),syb+iny*d*(1+chroma)),gg=sampleBi(src,sxb+inx*d,syb+iny*d),bb=sampleBi(src,sxb+inx*d*(1-chroma),syb+iny*d*(1-chroma));cr=rr[0];cg=gg[1];cb=bb[2]}
+    else{const c=sampleBi(src,sxb+inx*d,syb+iny*d);cr=c[0];cg=c[1];cb=c[2]}
+    const mixp=S.frost/100*0.6,fb=sampleBi(frost,sxb,syb);cr+=(fb[0]-cr)*mixp;cg+=(fb[1]-cg)*mixp;cb+=(fb[2]-cb)*mixp;
+    const tn=S.tint/100*0.22;cr+=(206-cr)*tn;cg+=(224-cg)*tn;cb+=(255-cb)*tn;
     const spec=Math.pow(Math.max(0,-inx*lx-iny*ly),1.5)*Math.max(0,1-Math.abs(t-0.5)*2)*(S.gloss/100);cr+=(255-cr)*spec;cg+=(255-cg)*spec;cb+=(255-cb)*spec;
-    const rim=Math.max(0,1-t/0.22)*0.5*(S.gloss/100);cr+=(255-cr)*rim;cg+=(255-cg)*rim;cb+=(255-cb)*rim;
+    const rim=Math.max(0,1-t/0.18)*0.6*(S.gloss/100);cr+=(255-cr)*rim;cg+=(255-cg)*rim;cb+=(255-cb)*rim;
     o[i]=cr;o[i+1]=cg;o[i+2]=cb;o[i+3]=ma}
-  ctx(view).putImageData(out,0,0)}
+  ctx(tmpC).putImageData(lay,0,0);g.drawImage(tmpC,0,0)}
 
 function render(full){if(!W)return;buildCrop();
-  if(full){buildBlur();if(S.inFig){buildFigure();applyGlassFig()}else applyGlassZone()}
-  else{const g=ctx(view);g.setTransform(1,0,0,1,0,0);g.filter='none';g.globalAlpha=1;g.clearRect(0,0,W,H);
-    if(S.inFig){ctx(tmpC).clearRect(0,0,W,H);ctx(tmpC).drawImage(cropC,0,0);const t=ctx(tmpC);t.globalCompositeOperation='destination-in';ctx(figC).clearRect(0,0,W,H);ctx(figC).fillStyle='#fff';fillFigure(ctx(figC));t.drawImage(figC,0,0);t.globalCompositeOperation='source-over';g.drawImage(tmpC,0,0)}
-    else g.drawImage(cropC,0,0)}
+  if(full){buildBlur();if(S.mode==='overlay'){buildFigure();applyGlassOverlay()}else applyGlassZone()}
+  else{const g=ctx(view);g.setTransform(1,0,0,1,0,0);g.filter='none';g.globalAlpha=1;g.clearRect(0,0,W,H);g.drawImage(cropC,0,0)}
   overlay()}
 function overlay(){const g=ctx(ov);g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,W,H);if(!W)return;const sc=W/Math.max(1,wrap.clientWidth);
-  g.save();g.setLineDash([6*sc,5*sc]);g.lineWidth=1*sc;g.strokeStyle='rgba(255,255,255,.5)';if(S.inFig)strokeFigure(g,1*sc);else clearPath(g),g.stroke();g.restore()}
+  g.save();g.setLineDash([6*sc,5*sc]);g.lineWidth=1*sc;g.strokeStyle='rgba(255,255,255,.5)';if(S.mode==='overlay')strokeFigure(g,1*sc);else{clearPath(g);g.stroke()}g.restore()}
 let raf=0,pendFull=false;
 function schedule(full){if(full)pendFull=true;if(raf)return;raf=requestAnimationFrame(()=>{raf=0;const f=pendFull;pendFull=false;render(f)})}
 
@@ -222,12 +221,12 @@ const DEF=[
    {t:'rng',k:'zoom',l:'зум',min:100,max:400},
    {t:'rng',k:'panx',l:'сдвиг X',min:-100,max:100},
    {t:'rng',k:'pany',l:'сдвиг Y',min:-100,max:100}]],
- ['Фигура',[{t:'chk',k:'inFig',l:'эффект в фигуре'},
-   {t:'sel',k:'fig',l:'фигура',o:[['squircle','скруглённая'],['rrect','прямоугольник'],['circle','круг'],['ellipse','овал'],['custom','свой SVG']],dim:()=>!S.inFig},
+ ['Вариант',[{t:'sel',k:'mode',l:'эффект',o:[['overlay','фигура-стекло над фото'],['edges','стекло по краям фото']]}]],
+ ['Фигура-окно',[{t:'sel',k:'fig',l:'фигура',o:[['squircle','скруглённая'],['rrect','прямоугольник'],['circle','круг'],['ellipse','овал'],['custom','свой SVG']],dim:()=>S.mode!=='overlay'},
    {t:'act',l:'свой SVG',b:'Загрузить SVG',f:()=>$('svg').click()},
-   {t:'rng',k:'figSize',l:'размер фигуры',min:30,max:100,dim:()=>!S.inFig}]],
- ['Стекло по краям',[{t:'sel',k:'shape',l:'зона (без фигуры)',o:[['ellipse','эллипс'],['circle','круг'],['rect','прямоугольник']],dim:()=>S.inFig},
-   {t:'rng',k:'clear',l:'чёткий центр',min:5,max:92,dim:()=>S.inFig},
+   {t:'rng',k:'figSize',l:'размер окна',min:25,max:100,dim:()=>S.mode!=='overlay'}]],
+ ['Стекло',[{t:'sel',k:'shape',l:'зона (по краям)',o:[['ellipse','эллипс'],['circle','круг'],['rect','прямоугольник']],dim:()=>S.mode!=='edges'},
+   {t:'rng',k:'clear',l:'чёткий центр',min:5,max:92,dim:()=>S.mode!=='edges'},
    {t:'rng',k:'band',l:'толщина стекла',min:5,max:100},
    {t:'rng',k:'refract',l:'преломление',min:0,max:100},
    {t:'rng',k:'frost',l:'матовость',min:0,max:100},
